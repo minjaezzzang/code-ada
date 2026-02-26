@@ -315,3 +315,35 @@ QGroupBox::title {
     subcontrol-origin: margin;
     left: 8px;
 }
+
+/* VS Code-like workbench shell */
+QToolBar#ActivityBar {
+    background: #252526;
+    border-right: 1px solid #3c3c3c;
+    spacing: 4px;
+    padding: 4px;
+}
+
+QToolBar#ActivityBar QToolButton {
+    color: #cccccc;
+    background: transparent;
+    border-radius: 4px;
+    padding: 6px 4px;
+}
+
+QToolBar#ActivityBar QToolButton:checked,
+QToolBar#ActivityBar QToolButton:hover {
+    background: #37373d;
+    color: #ffffff;
+}
+
+QDockWidget#PrimarySidebar {
+    min-width: 220px;
+}
+
+QDockWidget#PrimarySidebar::title {
+    background: #2d2d30;
+    color: #dddddd;
+    text-align: left;
+    padding-left: 8px;
+}

@@ -39,6 +39,13 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QProgressDialog,
+    QStackedWidget,
+    QLineEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QListWidget,
+    QListWidgetItem,
+    QTextEdit,
 )
 from PyQt5.QtGui import QKeySequence, QStandardItemModel, QCursor
 from mu import __version__
@@ -1165,10 +1172,132 @@ class Window(QMainWindow):
         self.button_bar = ButtonBar(self.widget)
         self.tabs = FileTabs()
         self.setCentralWidget(self.tabs)
+        self._setup_workbench_sidebar()
         self.status_bar = StatusBar(parent=self)
         self.setStatusBar(self.status_bar)
         self.addToolBar(self.button_bar)
         self.show()
+
+    def _setup_workbench_sidebar(self):
+        """
+        Build a lightweight VS Code-style activity bar + sidebar shell.
+
+        This keeps Mu's existing editor-centric flow intact while giving users
+        a familiar navigation model that can be expanded in future iterations.
+        """
+        self.activity_bar = QToolBar(self)
+        self.activity_bar.setMovable(False)
+        self.activity_bar.setFloatable(False)
+        self.activity_bar.setObjectName("ActivityBar")
+        self.activity_bar.setOrientation(Qt.Vertical)
+        self.activity_bar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.activity_bar.setIconSize(QSize(20, 20))
+        self.addToolBar(Qt.LeftToolBarArea, self.activity_bar)
+
+        self.sidebar = QDockWidget(_("Primary Sidebar"), self)
+        self.sidebar.setObjectName("PrimarySidebar")
+        self.sidebar.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.sidebar.setAllowedAreas(Qt.LeftDockWidgetArea)
+
+        container = QWidget(self.sidebar)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(6, 6, 6, 6)
+        container_layout.setSpacing(6)
+
+        self.sidebar_filter = QLineEdit(container)
+        self.sidebar_filter.setPlaceholderText(_("Filter sidebar items"))
+        container_layout.addWidget(self.sidebar_filter)
+
+        self.sidebar_stack = QStackedWidget(container)
+        self.sidebar_views = {}
+        self._activity_actions = {}
+
+        self.sidebar_views["explorer"] = self._build_explorer_view()
+        self.sidebar_views["search"] = self._build_search_view()
+        self.sidebar_views["source-control"] = self._build_source_control_view()
+        self.sidebar_views["run-debug"] = self._build_run_debug_view()
+
+        for view in self.sidebar_views.values():
+            self.sidebar_stack.addWidget(view)
+
+        container_layout.addWidget(self.sidebar_stack)
+        self.sidebar.setWidget(container)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.sidebar)
+
+        self._add_activity_button("explorer", _("Explorer"), "load")
+        self._add_activity_button("search", _("Search"), "help")
+        self._add_activity_button(
+            "source-control", _("Source Control"), "save"
+        )
+        self._add_activity_button("run-debug", _("Run & Debug"), "check")
+
+        self._set_sidebar_view("explorer")
+
+    def _add_activity_button(self, view_name, label, icon_name):
+        action = QAction(load_icon(icon_name), label, self.activity_bar)
+        action.setCheckable(True)
+        action.triggered.connect(lambda checked: self._set_sidebar_view(view_name))
+        self.activity_bar.addAction(action)
+        self._activity_actions[view_name] = action
+
+    def _set_sidebar_view(self, view_name):
+        if view_name not in self.sidebar_views:
+            return
+        self.sidebar_stack.setCurrentWidget(self.sidebar_views[view_name])
+        for name, action in self._activity_actions.items():
+            action.setChecked(name == view_name)
+
+    def _build_explorer_view(self):
+        widget = QWidget()
+        widget.setObjectName(_("Explorer"))
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        tree = QTreeWidget(widget)
+        tree.setHeaderHidden(True)
+        root = QTreeWidgetItem([_("Workspace")])
+        QTreeWidgetItem(root, [_("Open Folder...")])
+        QTreeWidgetItem(root, [_("Recent Files")])
+        tree.addTopLevelItem(root)
+        tree.expandAll()
+        layout.addWidget(tree)
+        return widget
+
+    def _build_search_view(self):
+        widget = QWidget()
+        widget.setObjectName(_("Search"))
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        query = QLineEdit(widget)
+        query.setPlaceholderText(_("Search in files"))
+        results = QListWidget(widget)
+        results.addItem(QListWidgetItem(_("No search results yet.")))
+        layout.addWidget(query)
+        layout.addWidget(results)
+        return widget
+
+    def _build_source_control_view(self):
+        widget = QWidget()
+        widget.setObjectName(_("Source Control"))
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        commit_box = QTextEdit(widget)
+        commit_box.setPlaceholderText(_("Message (Ctrl+Enter to commit)"))
+        changed_files = QListWidget(widget)
+        changed_files.addItem(QListWidgetItem(_("No changes detected.")))
+        layout.addWidget(commit_box)
+        layout.addWidget(changed_files)
+        return widget
+
+    def _build_run_debug_view(self):
+        widget = QWidget()
+        widget.setObjectName(_("Run & Debug"))
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        config_list = QListWidget(widget)
+        config_list.addItem(QListWidgetItem(_("Python: Current File")))
+        config_list.addItem(QListWidgetItem(_("Python: Module")))
+        layout.addWidget(config_list)
+        return widget
 
     def resizeEvent(self, resizeEvent):
         """
