@@ -61,6 +61,13 @@ into your virtualenv with::
 
         py -3 -mvenv .venv
 
+    On Debian/Ubuntu, if ``python -m venv`` fails with
+    ``ensurepip is not available``, install the OS package that provides venv
+    support for your target interpreter (for example ``python3-venv`` or
+    ``python3.8-venv``), then recreate the virtual environment::
+
+        sudo apt-get install python3-venv
+
     Virtual environment setup can vary depending on your operating system.
     To learn more about virtual environments, see this `in-depth guide from Real Python <https://realpython.com/python-virtual-environments-a-primer/>`_.
 

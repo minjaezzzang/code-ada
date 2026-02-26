@@ -35,6 +35,11 @@ Clone the repository::
 Create a virtualenv in Python 3.8::
 
     python3.8 -m venv .venv
+
+If that fails on Debian/Ubuntu with an ``ensurepip is not available`` error,
+install the venv package for your Python version and retry::
+
+    sudo apt-get install python3.8-venv
     
 Activate the environment, on macOS and Linux the command is::
 

@@ -39,6 +39,14 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QProgressDialog,
+    QStackedWidget,
+    QLineEdit,
+    QTreeView,
+    QFileSystemModel,
+    QListWidget,
+    QListWidgetItem,
+    QTextEdit,
+    QInputDialog,
 )
 from PyQt5.QtGui import QKeySequence, QStandardItemModel, QCursor
 from mu import __version__
@@ -1165,10 +1173,181 @@ class Window(QMainWindow):
         self.button_bar = ButtonBar(self.widget)
         self.tabs = FileTabs()
         self.setCentralWidget(self.tabs)
+        self._setup_workbench_sidebar()
         self.status_bar = StatusBar(parent=self)
         self.setStatusBar(self.status_bar)
-        self.addToolBar(self.button_bar)
+        self._setup_command_palette()
         self.show()
+
+    def _setup_command_palette(self):
+        """Expose Mu commands via a VS Code-like command palette shortcut."""
+        self.command_palette_shortcut = QShortcut(
+            QKeySequence("Ctrl+Shift+P"), self
+        )
+        self.command_palette_shortcut.activated.connect(
+            self._show_command_palette
+        )
+
+    def _show_command_palette(self):
+        commands = []
+        for action in self.button_bar.slots.values():
+            label = action.text()
+            if label:
+                commands.append((label, action))
+        commands.sort(key=lambda item: item[0].lower())
+        if not commands:
+            return
+        labels = [label for label, _ in commands]
+        selected, ok = QInputDialog.getItem(
+            self,
+            _("Command Palette"),
+            _("Type to run a command:"),
+            labels,
+            0,
+            False,
+        )
+        if ok and selected:
+            for label, action in commands:
+                if label == selected:
+                    action.trigger()
+                    break
+
+    def _setup_workbench_sidebar(self):
+        """
+        Build a VS Code-style activity bar + sidebar shell.
+        """
+        self.activity_bar = QToolBar(self)
+        self.activity_bar.setMovable(False)
+        self.activity_bar.setFloatable(False)
+        self.activity_bar.setObjectName("ActivityBar")
+        self.activity_bar.setOrientation(Qt.Vertical)
+        self.activity_bar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.activity_bar.setIconSize(QSize(22, 22))
+        self.addToolBar(Qt.LeftToolBarArea, self.activity_bar)
+
+        self.sidebar = QDockWidget("", self)
+        self.sidebar.setObjectName("PrimarySidebar")
+        self.sidebar.setTitleBarWidget(QWidget(self.sidebar))
+        self.sidebar.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.sidebar.setAllowedAreas(Qt.LeftDockWidgetArea)
+
+        container = QWidget(self.sidebar)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(6, 6, 6, 6)
+        container_layout.setSpacing(6)
+
+        self.sidebar_filter = QLineEdit(container)
+        self.sidebar_filter.setPlaceholderText(_("Filter files (Explorer)"))
+        self.sidebar_filter.textChanged.connect(self._filter_explorer)
+        container_layout.addWidget(self.sidebar_filter)
+
+        self.sidebar_stack = QStackedWidget(container)
+        self.sidebar_views = {}
+        self._activity_actions = {}
+
+        self.sidebar_views["explorer"] = self._build_explorer_view()
+        self.sidebar_views["search"] = self._build_search_view()
+        self.sidebar_views["source-control"] = self._build_source_control_view()
+        self.sidebar_views["run-debug"] = self._build_run_debug_view()
+
+        for view in self.sidebar_views.values():
+            self.sidebar_stack.addWidget(view)
+
+        container_layout.addWidget(self.sidebar_stack)
+        self.sidebar.setWidget(container)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.sidebar)
+
+        self._add_activity_button("explorer", _("Explorer"), "load")
+        self._add_activity_button("search", _("Search"), "help")
+        self._add_activity_button("source-control", _("Source Control"), "save")
+        self._add_activity_button("run-debug", _("Run & Debug"), "check")
+
+        self._set_sidebar_view("explorer")
+
+    def _add_activity_button(self, view_name, label, icon_name):
+        action = QAction(load_icon(icon_name), "", self.activity_bar)
+        action.setCheckable(True)
+        action.setToolTip(label)
+        action.triggered.connect(lambda checked: self._set_sidebar_view(view_name))
+        self.activity_bar.addAction(action)
+        self._activity_actions[view_name] = action
+
+    def _set_sidebar_view(self, view_name):
+        if view_name not in self.sidebar_views:
+            return
+        self.sidebar_stack.setCurrentWidget(self.sidebar_views[view_name])
+        self.sidebar_filter.setVisible(view_name == "explorer")
+        for name, action in self._activity_actions.items():
+            action.setChecked(name == view_name)
+
+    def _build_explorer_view(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.explorer_model = QFileSystemModel(widget)
+        root_path = os.path.abspath(os.getcwd())
+        self.explorer_model.setRootPath(root_path)
+
+        self.explorer_tree = QTreeView(widget)
+        self.explorer_tree.setModel(self.explorer_model)
+        self.explorer_tree.setRootIndex(self.explorer_model.index(root_path))
+        self.explorer_tree.setHeaderHidden(True)
+        self.explorer_tree.doubleClicked.connect(self._open_file_from_explorer)
+
+        for col in (1, 2, 3):
+            self.explorer_tree.hideColumn(col)
+
+        layout.addWidget(self.explorer_tree)
+        return widget
+
+    def _filter_explorer(self, text):
+        if not hasattr(self, "explorer_model"):
+            return
+        base_path = os.path.abspath(os.getcwd())
+        if text.strip():
+            self.explorer_model.setNameFilters(["*{}*".format(text.strip())])
+            self.explorer_model.setNameFilterDisables(False)
+        else:
+            self.explorer_model.setNameFilters([])
+            self.explorer_model.setNameFilterDisables(True)
+        self.explorer_tree.setRootIndex(self.explorer_model.index(base_path))
+
+    def _open_file_from_explorer(self, index):
+        file_path = self.explorer_model.filePath(index)
+        if os.path.isfile(file_path):
+            self.open_file.emit(file_path)
+
+    def _build_search_view(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        help_text = QLabel(_("Use Ctrl+Shift+P for commands and Ctrl+F in editor for text search."), widget)
+        help_text.setWordWrap(True)
+        layout.addWidget(help_text)
+        return widget
+
+    def _build_source_control_view(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        commit_box = QTextEdit(widget)
+        commit_box.setPlaceholderText(_("Commit message"))
+        changed_files = QListWidget(widget)
+        changed_files.addItem(QListWidgetItem(_("Git integration placeholder.")))
+        layout.addWidget(commit_box)
+        layout.addWidget(changed_files)
+        return widget
+
+    def _build_run_debug_view(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        config_list = QListWidget(widget)
+        config_list.addItem(QListWidgetItem(_("Run current file")))
+        config_list.addItem(QListWidgetItem(_("Start debugger")))
+        layout.addWidget(config_list)
+        return widget
 
     def resizeEvent(self, resizeEvent):
         """
